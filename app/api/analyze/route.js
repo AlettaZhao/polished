@@ -1,3 +1,5 @@
+import { jsonrepair } from "jsonrepair";
+
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
@@ -46,6 +48,7 @@ export async function POST(req) {
       body: JSON.stringify({
         model,
         temperature: 0.3,
+        max_tokens: 4096,
         response_format: { type: "json_object" },
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
@@ -76,11 +79,22 @@ export async function POST(req) {
     let parsed;
     try {
       parsed = JSON.parse(jsonStr);
-    } catch (e) {
-      return Response.json(
-        { error: `解析 Kimi 返回失败: ${e.message}`, raw: raw.slice(0, 500) },
-        { status: 502 }
-      );
+    } catch (e1) {
+      try {
+        parsed = JSON.parse(jsonrepair(jsonStr));
+      } catch (e2) {
+        const m = /position\s+(\d+)/.exec(e1.message);
+        const pos = m ? parseInt(m[1], 10) : 0;
+        const around = pos ? raw.slice(Math.max(0, pos - 80), pos + 80) : raw.slice(0, 400);
+        return Response.json(
+          {
+            error: `解析 Kimi 返回失败: ${e1.message}`,
+            raw_length: raw.length,
+            raw_around_error: around,
+          },
+          { status: 502 }
+        );
+      }
     }
 
     return Response.json(parsed);
