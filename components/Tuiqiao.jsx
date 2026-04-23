@@ -212,15 +212,19 @@ export default function Tuiqiao() {
             </div>
 
             {/* Reading area */}
-            <article style={{ fontSize: 19, lineHeight: 2.4, color: "#2C2B28" }}>
+            <article style={{ fontSize: 20, lineHeight: 2.6, color: "#2C2B28" }}>
               {analysis.sentences.map((sent, si) => {
                 const layerKey = layerMode === "abstraction" ? sent.abstraction_layer : sent.speech_act_layer;
                 const layer = LAYERS[layerMode][layerKey];
                 const transition = analysis.layer_transitions?.find(t => t.to_idx === si);
-                const logic = sent.logic_to_prev && sent.logic_to_prev !== "none" ? LOGIC_LABELS[sent.logic_to_prev] : null;
+                const logicKind = sent.logic_to_prev && sent.logic_to_prev !== "none" ? sent.logic_to_prev : null;
+                const isHeroLogic = logicKind && ["contrast", "cause", "condition"].includes(logicKind);
 
                 return (
                   <span key={si}>
+                    {/* Hero logic shape (always visible for 3 key relations) */}
+                    {si > 0 && isHeroLogic && <LogicShape kind={logicKind} />}
+
                     {/* Jump marker (X-ray only) */}
                     {xray && transition && (
                       <JumpMarker
@@ -229,7 +233,8 @@ export default function Tuiqiao() {
                         onToggle={() => setExpandedJump(expandedJump === si ? null : si)}
                       />
                     )}
-                    {xray && si > 0 && logic && (
+                    {/* Minor logic label (X-ray only, non-hero relations) */}
+                    {xray && si > 0 && logicKind && !isHeroLogic && (
                       <span style={{
                         display: "inline-block",
                         verticalAlign: "middle",
@@ -239,7 +244,7 @@ export default function Tuiqiao() {
                         color: "#B0A898",
                         background: "#F0EDE6",
                         borderRadius: 2,
-                      }}>{logic}</span>
+                      }}>{LOGIC_LABELS[logicKind]}</span>
                     )}
 
                     <SentenceBlock
@@ -263,8 +268,8 @@ export default function Tuiqiao() {
             <div style={{ fontSize: 48, color: "#D8D4CC", marginBottom: 14, letterSpacing: 6, fontWeight: 300 }}>推敲</div>
             <p style={{ fontSize: 13, color: "#B8B0A4", lineHeight: 2.2, maxWidth: 320, margin: "0 auto", fontWeight: 300 }}>
               粘贴一段文字<br />
-              模糊之处会以底色和下划线标出<br />
-              悬停词语，浮现候选含义
+              语义模糊处会放大并虚化<br />
+              悬停看清，点击候选确定含义
             </p>
           </div>
         )}
@@ -338,7 +343,7 @@ function SentenceBlock({ sent, sentIdx, layerColor, picked, onWordEnter, onWordL
         transition: "background .2s",
       }}>
         {parts}
-        <span>。</span>
+        {!/[。？！，,.?!;；]$/.test(text) && <span>。</span>}
       </span>
 
       {pickedEntries.map(({ h }) => {
@@ -365,19 +370,30 @@ function SentenceBlock({ sent, sentIdx, layerColor, picked, onWordEnter, onWordL
   );
 }
 
-/* ── Ambiguous word span ── */
+/* ── Ambiguous word span — bigger + blurred, clarifies on hover ── */
 function AmbiguousWord({ original, displayRewrite, severity, onEnter, onLeave, onClearPick }) {
+  const [hovering, setHovering] = useState(false);
   const picked = displayRewrite != null;
-  const underlineColor = severity >= 3 ? "#C25A46" : severity >= 2 ? "#C27A5A" : "#C29878";
+
+  // severity → visual intensity
+  const sev = Math.max(1, Math.min(3, severity || 2));
+  const scale = sev === 3 ? 1.32 : sev === 2 ? 1.18 : 1.08;
+  const blur  = sev === 3 ? 1.3  : sev === 2 ? 0.75 : 0.4;
+
+  const foggy = !picked && !hovering;
 
   return (
     <span
       className="tq-word"
       onMouseEnter={e => {
+        setHovering(true);
         const rect = e.currentTarget.getBoundingClientRect();
         onEnter(rect);
       }}
-      onMouseLeave={onLeave}
+      onMouseLeave={() => {
+        setHovering(false);
+        onLeave();
+      }}
       onClick={e => {
         if (picked && onClearPick) {
           e.stopPropagation();
@@ -385,26 +401,90 @@ function AmbiguousWord({ original, displayRewrite, severity, onEnter, onLeave, o
         }
       }}
       style={{
+        display: "inline-block",
+        verticalAlign: "baseline",
         cursor: picked ? "pointer" : "help",
-        borderBottom: picked ? "none" : `${Math.max(1.5, severity)}px ${severity >= 3 ? "solid" : "dashed"} ${underlineColor}`,
+        fontSize: picked ? "1em" : `${scale}em`,
+        fontWeight: picked ? 500 : 600,
+        letterSpacing: picked ? 0 : "0.02em",
+        color: picked ? "#6A5A48" : "#2C2B28",
         background: picked ? "#F0EAE0" : "transparent",
-        color: picked ? "#6A5A48" : "inherit",
-        padding: picked ? "0 4px" : "0 1px",
-        borderRadius: picked ? 3 : 1,
-        fontWeight: picked ? 500 : undefined,
-        transition: "all .15s",
+        padding: picked ? "0 5px" : "0 2px",
+        margin: "0 1px",
+        borderRadius: picked ? 3 : 2,
+        filter: foggy ? `blur(${blur}px)` : "none",
+        transition: "filter .22s, font-size .2s, background .15s",
         position: "relative",
       }}
       title={picked ? "点击还原" : undefined}
     >
       {picked ? (
         <>
-          <span style={{ color: "#C8C0B4", textDecoration: "line-through", marginRight: 6, fontSize: "0.92em" }}>{original}</span>
+          <span style={{ color: "#C8C0B4", textDecoration: "line-through", marginRight: 6, fontSize: "0.88em", fontWeight: 400 }}>{original}</span>
           {displayRewrite}
         </>
       ) : original}
     </span>
   );
+}
+
+/* ── Logic shape — 3 hero relations get a distinctive glyph ── */
+function LogicShape({ kind }) {
+  if (kind === "contrast") {
+    // U-shape bubble folding back — echoes the WeChat-bubble idea
+    const color = "#A65A72";
+    return (
+      <span style={{
+        display: "inline-flex", alignItems: "center", gap: 4,
+        verticalAlign: "middle", margin: "0 10px",
+        color, fontSize: 12, fontWeight: 500, letterSpacing: "0.04em",
+      }}>
+        <svg width="40" height="22" viewBox="0 0 40 22" fill="none" aria-hidden="true">
+          <path d="M 5 20 C 5 4, 35 4, 35 20" stroke={color} strokeWidth="1.8" strokeLinecap="round" />
+          <path d="M 30 15 L 35 20 L 40 15" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+          <circle cx="5" cy="20" r="1.6" fill={color} />
+        </svg>
+        <span>但</span>
+      </span>
+    );
+  }
+  if (kind === "cause") {
+    // Downward thick arrow — "所以 / 因此"
+    const color = "#5A8FA6";
+    return (
+      <span style={{
+        display: "inline-flex", alignItems: "center", gap: 4,
+        verticalAlign: "middle", margin: "0 10px",
+        color, fontSize: 12, fontWeight: 500, letterSpacing: "0.04em",
+      }}>
+        <svg width="16" height="22" viewBox="0 0 16 22" fill="none" aria-hidden="true">
+          <line x1="8" y1="3" x2="8" y2="15" stroke={color} strokeWidth="2.2" strokeLinecap="round" />
+          <path d="M 3 13 L 8 19 L 13 13" stroke={color} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+        </svg>
+        <span>所以</span>
+      </span>
+    );
+  }
+  if (kind === "condition") {
+    // Y-fork — "若 … 则"
+    const color = "#7E5EA6";
+    return (
+      <span style={{
+        display: "inline-flex", alignItems: "center", gap: 4,
+        verticalAlign: "middle", margin: "0 10px",
+        color, fontSize: 12, fontWeight: 500, letterSpacing: "0.04em",
+      }}>
+        <span style={{ opacity: 0.85 }}>若</span>
+        <svg width="22" height="18" viewBox="0 0 22 18" fill="none" aria-hidden="true">
+          <line x1="11" y1="2" x2="11" y2="8"  stroke={color} strokeWidth="1.8" strokeLinecap="round" />
+          <line x1="11" y1="8" x2="4"  y2="16" stroke={color} strokeWidth="1.8" strokeLinecap="round" />
+          <line x1="11" y1="8" x2="18" y2="16" stroke={color} strokeWidth="1.8" strokeLinecap="round" />
+        </svg>
+        <span>则</span>
+      </span>
+    );
+  }
+  return null;
 }
 
 /* ── Jump marker (X-ray mode) ── */

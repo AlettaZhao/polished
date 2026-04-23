@@ -5,26 +5,78 @@ export const maxDuration = 60;
 
 const SYSTEM_PROMPT = `You are a JSON-only API. Respond with valid JSON only. No markdown, no backticks. Use straight double quotes for JSON syntax. Inside string values, never use double quotes - use single quotes or angle brackets instead. Escape special characters properly.`;
 
-const buildUserPrompt = (text) => `Analyze this Chinese text. Return ONLY valid JSON.
+const buildUserPrompt = (text) => `Analyze this Chinese text sentence by sentence. Be AGGRESSIVE in finding vagueness — err on the side of marking MORE, not less. A good analysis marks 3-5 ambiguous phrases per typical sentence.
 
 Text: ${text}
 
 Schema:
-{"sentences":[{"text":"original sentence","abstraction_layer":"sensory|structure|function|strategy|value","speech_act_layer":"describe|feel|judge|claim|reason","logic_to_prev":"cause|contrast|addition|condition|concession|sequence|summary|parallel|none","ambiguous":[{"phrase":"the ambiguous word/phrase exactly as it appears in text","severity":1-3,"hint":"10-char hint shown on hover","why_ambiguous":"one line explanation","possible_meanings":[{"interpretation":"meaning","rewrite":"precise alternative"}],"followup_question":"sharp Socratic question"}],"annotation":"15-char editorial note on this sentence"}],"layer_transitions":[{"from_idx":0,"to_idx":1,"description":"30-char explanation of this layer jump"}]}
+{"sentences":[{"text":"original sentence","abstraction_layer":"sensory|structure|function|strategy|value","speech_act_layer":"describe|feel|judge|claim|reason","logic_to_prev":"cause|contrast|addition|condition|concession|sequence|summary|parallel|none","ambiguous":[{"phrase":"exact substring as it appears","severity":1-3,"hint":"≤10-char Chinese hint","why_ambiguous":"one-line reason","possible_meanings":[{"interpretation":"concrete short phrase","rewrite":"drop-in replacement"}],"followup_question":"sharp Chinese question listing candidates"}],"annotation":"≤15-char editorial note"}],"layer_transitions":[{"from_idx":0,"to_idx":1,"description":"≤30-char explanation"}]}
 
-Rules:
-1. Split by 。？！
-2. severity: 1=slightly ambiguous, 2=notably ambiguous, 3=very ambiguous/could cause misunderstanding
-3. Find ALL ambiguous expressions aggressively:
-   - Adjectives: 简单/复杂/好/不好/自然/优雅/合理 - what specific kind?
-   - Noun phrases: 用户体验/效果/问题/方案 - which aspect? whose?
-   - Degree adverbs: 很/太/并不/更/比较 - how much?
-   - Verbs: 做得/找不到/提升/改善 - do what specifically?
-4. followup_question: sharp Socratic questions in Chinese, the most important field
-5. hint: very short Chinese hint for hover tooltip (max 10 chars like '哪种简单？')
-6. annotation: ultra-short Chinese note (max 15 chars)
-7. All Chinese content in string values must use single quotes instead of double quotes
-8. layer_transitions only when jumps cause real communication problems`;
+What to mark as ambiguous (cast a WIDE net, 5 categories):
+
+A. Modal / cognitive hedges — they hide the SOURCE of a claim:
+   我觉得 / 我认为 / 感觉 / 似乎 / 好像 / 应该 / 可能
+   → Is this personal gut, experience, or inference from data?
+   e.g. '我觉得' → candidates: ['个人直觉', '经验判断', '观察推论']
+
+B. Subjective adjectives without specified dimension:
+   简单 / 复杂 / 好 / 不好 / 自然 / 优雅 / 合理 / 丑 / 快 / 慢
+   → WHICH dimension exactly?
+   e.g. '简单' → ['界面简约', '功能较少', '交互直观', '克制不堆砌']
+   e.g. '不好' → ['不流畅', '结果不满意', '体验不愉快', '效率不高']
+
+C. Abstract umbrella nouns:
+   用户体验 / 效果 / 问题 / 方案 / 价值 / 质量 / 影响 / 表现
+   → WHICH aspect? WHOSE? measured HOW?
+   e.g. '用户体验' → ['交互体验', '视觉体验', '情感体验', '任务完成效率']
+
+D. Degree adverbs + adjective phrase (mark the whole phrase):
+   很X / 太X / 并不X / 更X / 比较X / 非常X / 特别X
+   → How much? Relative to what?
+
+E. Vague action verbs:
+   做得 / 提升 / 改善 / 优化 / 搞定 / 处理 / 解决
+   → Do WHAT specifically?
+
+TARGET GRANULARITY (THIS IS THE EXPECTED LEVEL OF DETAIL):
+For a sentence like '我觉得这个设计很简单，但是用户体验并不好', you MUST mark at minimum these 4 phrases:
+- '我觉得' severity=1 → ['个人觉得', '经验认为']
+- '很简单' severity=3 → ['界面简约', '功能较少', '交互直观']
+- '用户体验' severity=2 → ['交互体验', '视觉体验', '情感体验']
+- '并不好' severity=2 → ['不流畅', '结果不满意']
+
+Rules for ambiguous entries:
+1. phrase MUST be the EXACT substring as it appears in the sentence (the frontend does indexOf lookup — any deviation breaks highlighting)
+2. possible_meanings: 2-4 items. Each interpretation is a CONCRETE short phrase (e.g. '界面元素少', NOT '在视觉方面'). rewrite is a drop-in word/short phrase.
+3. Candidates must be genuinely DIFFERENT — picking one vs another should noticeably change the sentence's meaning
+4. followup_question: pattern '你说的X，是指A、B，还是C？' — list 2-3 real candidates
+5. hint: ≤10 Chinese chars
+6. severity: 1=mild / 2=notably vague / 3=could cause real misunderstanding
+
+Sentence-level fields:
+- SPLITTING: Split the text ONLY at 。？！ — a 逗号/, DOES NOT start a new sentence. Comma-clauses belong to the same sentence.
+  e.g. '我觉得这个设计很简单，但是用户体验并不好。因为导航太复杂，用户找不到功能。' → EXACTLY 2 sentences, NOT 4.
+  Do NOT split at 、,，；: these are intra-sentence separators.
+- abstraction_layer: MUST be exactly one of [sensory, structure, function, strategy, value]. Never invent new values.
+- speech_act_layer: MUST be exactly one of [describe, feel, judge, claim, reason]. Never invent new values (e.g. 'predict' is NOT allowed — use 'claim' for predictions).
+- logic_to_prev: MUST be exactly one of [cause, contrast, addition, condition, concession, sequence, summary, parallel, none]. Never invent new values (e.g. 'consequence' is NOT allowed — use 'cause' instead).
+  HARD RULES — if the sentence STARTS with (or its first clause starts with) any cue below, you MUST use the matching logic, overriding any other judgment:
+    因为/所以/因此/于是 → cause
+    但是/然而/可是/不过 → contrast
+    如果/若/假如/要是/倘若 → condition
+    虽然/尽管 → concession
+    而且/并且/同时/此外 → addition
+    首先/然后/接着/最后 → sequence
+    总之/综上/总的来说 → summary
+    一方面…另一方面 → parallel
+- annotation: ≤15 Chinese chars
+
+layer_transitions: Include AT MOST 1-2 entries, ONLY for the single most jarring adjacent-sentence jump that genuinely damages communication. If no such jump exists, return an empty array []. Do NOT list routine transitions.
+
+Output rules:
+- Valid JSON ONLY. No markdown, no backticks.
+- In Chinese string values, use single quotes '' NOT double quotes "".
+- Escape special chars properly.`;
 
 export async function POST(req) {
   try {
@@ -48,7 +100,7 @@ export async function POST(req) {
       body: JSON.stringify({
         model,
         temperature: 0.3,
-        max_tokens: 4096,
+        max_tokens: 6144,
         response_format: { type: "json_object" },
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
