@@ -1,0 +1,29 @@
+@import url("https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@300;400;600;700&display=swap");
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+
+body {
+  font-family: "Noto Serif SC", "Source Han Serif SC", Georgia, serif;
+}
+
+textarea:focus { outline: none; border-color: #B8A080 !important; }
+
+.tq-word:hover { filter: brightness(0.96); }
+.tq-ex:hover   { background: #EDEAE4 !important; }
+.tq-pill:hover { background: rgba(0, 0, 0, 0.05) !important; }
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes dotPulse {
+  0%, 100% { opacity: 0.3; }
+  50%      { opacity: 1; }
+}
+
+@keyframes wheelIn {
+  from { opacity: 0; transform: translate(-50%, calc(-100% - 8px)) scale(0.85); }
+  to   { opacity: 1; transform: translate(-50%, calc(-100% - 8px)) scale(1); }
+}
